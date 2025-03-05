@@ -12,7 +12,7 @@ enum ProcessState {
     READY = 1,
     RUNNING = 2,
     TERMINATED = 3,
-    IOWAITING = 4  // New state for Project 2
+    IOWAITING = 4
 };
 
 // Constants for instruction types
@@ -36,25 +36,18 @@ struct PCB {
     int maxMemoryNeeded;
     int mainMemoryBase;
     int numInstructions;
-    int startTime;     // Time when process first entered running state
-    int endTime;       // Time when process terminated
-    int ioReturnTime;  // Time when I/O operation will complete
-};
-
-// Structure to store instruction data temporarily
-struct Instruction {
-    int type;
-    int param1;
-    int param2;
+    int startTime;      // Time when process first entered running state
+    int endTime;        // Time when process terminated
+    int ioReturnTime;   // Time when I/O operation will complete
 };
 
 // Global variables
-int CPUAllocated;     // Max CPU time allocation before timeout
+int CPUAllocated;      // Max CPU time allocation before timeout
 int contextSwitchTime; // Time to switch context
 int globalCPUClock = 0; // Global CPU clock
 
 // Function prototypes
-void loadJobsToMemory(vector<PCB>& processes, vector<vector<Instruction>>& instructions, vector<int>& mainMemory, queue<int>& readyQueue);
+void loadJobsToMemory(vector<PCB>& processes, vector<int>& mainMemory, queue<int>& readyQueue);
 void executeCPU(int startAddress, vector<int>& mainMemory, queue<int>& readyQueue, queue<PCB>& ioWaitingQueue);
 void checkIOWaitingQueue(queue<PCB>& ioWaitingQueue, queue<int>& readyQueue, vector<int>& mainMemory);
 void printMainMemory(vector<int>& mainMemory);
@@ -64,9 +57,8 @@ int main() {
     int maxMemory;
     int numProcesses;
     vector<PCB> processes;
-    vector<vector<Instruction>> instructions;
     queue<int> readyQueue;
-    queue<PCB> ioWaitingQueue; // New queue for Project 2
+    queue<PCB> ioWaitingQueue;
     
     // Step 1: Read and parse input file
     cin >> maxMemory >> CPUAllocated >> contextSwitchTime;
@@ -77,6 +69,7 @@ int main() {
     // Parse process information and instructions
     for (int i = 0; i < numProcesses; i++) {
         PCB process;
+        process.processID = i + 1; // Process IDs start from 1
         process.state = NEW;
         process.programCounter = 0;
         process.cpuCyclesUsed = 0;
@@ -84,35 +77,34 @@ int main() {
         process.startTime = -1;  // Not started yet
         process.endTime = -1;    // Not terminated yet
         
-        cin >> process.processID >> process.maxMemoryNeeded >> process.numInstructions;
+        cin >> process.maxMemoryNeeded >> process.numInstructions;
         
-        vector<Instruction> processInstructions;
-        
-        for (int j = 0; j < process.numInstructions; j++) {
-            Instruction instr;
-            cin >> instr.type;
-            
-            if (instr.type == COMPUTE) {
-                cin >> instr.param1 >> instr.param2;
-            } else if (instr.type == PRINT) {
-                cin >> instr.param1;
-                instr.param2 = 0; // Dummy value
-            } else if (instr.type == STORE) {
-                cin >> instr.param1 >> instr.param2;
-            } else if (instr.type == LOAD) {
-                cin >> instr.param1;
-                instr.param2 = 0; // Dummy value
-            }
-            
-            processInstructions.push_back(instr);
-        }
-        
+        // Store the process in our processes vector
         processes.push_back(process);
-        instructions.push_back(processInstructions);
+        
+        // Skip the actual instructions for now, we'll parse them when loading into memory
+        for (int j = 0; j < process.numInstructions; j++) {
+            int instructionType;
+            cin >> instructionType;
+            
+            if (instructionType == COMPUTE) {
+                int param1, param2;
+                cin >> param1 >> param2;
+            } else if (instructionType == PRINT) {
+                int param1;
+                cin >> param1;
+            } else if (instructionType == STORE) {
+                int param1, param2;
+                cin >> param1 >> param2;
+            } else if (instructionType == LOAD) {
+                int param1;
+                cin >> param1;
+            }
+        }
     }
     
     // Load jobs into main memory
-    loadJobsToMemory(processes, instructions, mainMemory, readyQueue);
+    loadJobsToMemory(processes, mainMemory, readyQueue);
     
     // Print the content of the main memory
     printMainMemory(mainMemory);
@@ -144,19 +136,17 @@ int main() {
 }
 
 // Load jobs into main memory and move them to ready queue
-void loadJobsToMemory(vector<PCB>& processes, vector<vector<Instruction>>& instructions, vector<int>& mainMemory, queue<int>& readyQueue) {
+void loadJobsToMemory(vector<PCB>& processes, vector<int>& mainMemory, queue<int>& readyQueue) {
     int currentMemoryPosition = 0;
     
-    for (int i = 0; i < processes.size(); i++) {
-        PCB& process = processes[i];
-        vector<Instruction>& processInstructions = instructions[i];
-        
+    for (PCB& process : processes) {
         // Check if there's enough memory for this process
         if (currentMemoryPosition + process.maxMemoryNeeded <= mainMemory.size()) {
             // Set memory locations for this process
             process.mainMemoryBase = currentMemoryPosition;
             process.instructionBase = currentMemoryPosition + 10; // PCB takes 10 spaces
             process.dataBase = process.instructionBase + (process.numInstructions * 3); // Each instruction takes 3 integers
+            process.memoryLimit = process.maxMemoryNeeded;
             
             // Store PCB in main memory
             mainMemory[currentMemoryPosition] = process.processID;
@@ -170,12 +160,79 @@ void loadJobsToMemory(vector<PCB>& processes, vector<vector<Instruction>>& instr
             mainMemory[currentMemoryPosition + 8] = process.maxMemoryNeeded;
             mainMemory[currentMemoryPosition + 9] = process.mainMemoryBase;
             
-            // Store instructions in main memory
-            for (int j = 0; j < processInstructions.size(); j++) {
-                Instruction instr = processInstructions[j];
-                mainMemory[process.instructionBase + (j * 3)] = instr.type;
-                mainMemory[process.instructionBase + (j * 3) + 1] = instr.param1;
-                mainMemory[process.instructionBase + (j * 3) + 2] = instr.param2;
+            // Seek back to beginning of this process's instructions
+            cin.clear();
+            cin.seekg(0, ios::beg);
+            
+            // Skip the first few lines of input
+            int dummy;
+            cin >> dummy >> dummy >> dummy; // Skip maxMemory, CPUAllocated, contextSwitchTime
+            cin >> dummy; // Skip numProcesses
+            
+            // Skip to this process's instructions
+            for (int i = 0; i < process.processID - 1; i++) {
+                int maxMem, numInstr;
+                cin >> maxMem >> numInstr;
+                
+                for (int j = 0; j < numInstr; j++) {
+                    int instrType;
+                    cin >> instrType;
+                    
+                    if (instrType == COMPUTE) {
+                        int param1, param2;
+                        cin >> param1 >> param2;
+                    } else if (instrType == PRINT) {
+                        int param1;
+                        cin >> param1;
+                    } else if (instrType == STORE) {
+                        int param1, param2;
+                        cin >> param1 >> param2;
+                    } else if (instrType == LOAD) {
+                        int param1;
+                        cin >> param1;
+                    }
+                }
+            }
+            
+            // Now read this process's instructions
+            int maxMem, numInstr;
+            cin >> maxMem >> numInstr;
+            
+            // Read and store instructions in main memory
+            for (int j = 0; j < process.numInstructions; j++) {
+                int instrType;
+                cin >> instrType;
+                
+                mainMemory[process.instructionBase + (j * 3)] = instrType;
+                
+                if (instrType == COMPUTE) {
+                    int param1, param2;
+                    cin >> param1 >> param2;
+                    mainMemory[process.instructionBase + (j * 3) + 1] = param1;
+                    mainMemory[process.instructionBase + (j * 3) + 2] = param2;
+                } else if (instrType == PRINT) {
+                    int param1;
+                    cin >> param1;
+                    mainMemory[process.instructionBase + (j * 3) + 1] = param1;
+                    mainMemory[process.instructionBase + (j * 3) + 2] = 0; // Dummy value
+                } else if (instrType == STORE) {
+                    int param1, param2;
+                    cin >> param1 >> param2;
+                    mainMemory[process.instructionBase + (j * 3) + 1] = param1;
+                    mainMemory[process.instructionBase + (j * 3) + 2] = param2;
+                } else if (instrType == LOAD) {
+                    int param1;
+                    cin >> param1;
+                    mainMemory[process.instructionBase + (j * 3) + 1] = param1;
+                    mainMemory[process.instructionBase + (j * 3) + 2] = 0; // Dummy value
+                }
+            }
+            
+            // Initialize data segment if needed
+            for (int i = process.dataBase; i < process.mainMemoryBase + process.maxMemoryNeeded; i++) {
+                if (i < mainMemory.size()) {
+                    mainMemory[i] = 0; // Initialize data to 0
+                }
             }
             
             // Set process state to READY and update in memory
@@ -211,8 +268,7 @@ void executeCPU(int startAddress, vector<int>& mainMemory, queue<int>& readyQueu
     process.mainMemoryBase = mainMemory[startAddress + 9];
     
     // Calculate the number of instructions based on dataBase - instructionBase
-    int totalInstructionSpace = process.dataBase - process.instructionBase;
-    process.numInstructions = totalInstructionSpace / 3; // Each instruction takes 3 integers
+    process.numInstructions = (process.dataBase - process.instructionBase) / 3; // Each instruction takes 3 integers
     
     // Set process state to RUNNING
     process.state = RUNNING;
@@ -296,7 +352,7 @@ void executeCPU(int startAddress, vector<int>& mainMemory, queue<int>& readyQueu
             int actualAddress = process.dataBase + address;
             
             // Check if address is within bounds
-            if (address >= 0 && actualAddress < process.mainMemoryBase + process.memoryLimit) {
+            if (address >= 0 && actualAddress < process.mainMemoryBase + process.maxMemoryNeeded) {
                 mainMemory[actualAddress] = value;
                 cout << "stored" << endl;
                 
@@ -327,7 +383,7 @@ void executeCPU(int startAddress, vector<int>& mainMemory, queue<int>& readyQueu
             int actualAddress = process.dataBase + address;
             
             // Check if address is within bounds
-            if (address >= 0 && actualAddress < process.mainMemoryBase + process.memoryLimit) {
+            if (address >= 0 && actualAddress < process.mainMemoryBase + process.maxMemoryNeeded) {
                 int value = mainMemory[actualAddress];
                 cout << "loaded" << endl;
                 
